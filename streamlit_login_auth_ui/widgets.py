@@ -1,6 +1,10 @@
 import streamlit as st
 import json
 import os
+import random
+import string
+import io
+import base64
 from streamlit_lottie import st_lottie
 from streamlit_option_menu import option_menu
 from streamlit_cookies_manager import EncryptedCookieManager
@@ -10,12 +14,14 @@ from .utils import check_valid_name
 from .utils import check_valid_email
 from .utils import check_unique_email
 from .utils import check_unique_usr
+from .utils import check_username_exists
 from .utils import register_new_usr
 from .utils import check_email_exists
 from .utils import generate_random_passwd
 from .utils import send_passwd_in_email
 from .utils import change_passwd
 from .utils import check_current_passwd
+from captcha.image import ImageCaptcha
 
 
 class __login__:
@@ -73,50 +79,58 @@ class __login__:
                 return True
         return False
 
-    def get_username(self):
-        if st.session_state['LOGOUT_BUTTON_HIT'] == False:
-            fetched_cookies = self.cookies
-            if '__streamlit_login_signup_ui_username__' in fetched_cookies.keys():
-                username=fetched_cookies['__streamlit_login_signup_ui_username__']
-                return username
- 
 
     def login_widget(self) -> None:
         """
         Creates the login widget, checks and sets cookies, authenticates the users.
         """
+        if 'LOGGED_IN' not in st.session_state:
+            st.session_state['LOGGED_IN'] = False
 
-        # Checks if cookie exists.
-        if st.session_state['LOGGED_IN'] == False:
-            if st.session_state['LOGOUT_BUTTON_HIT'] == False:
-                fetched_cookies = self.cookies
-                if '__streamlit_login_signup_ui_username__' in fetched_cookies.keys():
-                    if fetched_cookies['__streamlit_login_signup_ui_username__'] != '1c9a923f-fb21-4a91-b3f3-5f18e3f01182':
-                        st.session_state['LOGGED_IN'] = True
+        if not st.session_state['LOGGED_IN']:
+            fetched_cookies = self.cookies
+            if '__streamlit_login_signup_ui_username__' in fetched_cookies.keys():
+                username_from_cookie = fetched_cookies['__streamlit_login_signup_ui_username__']
+                if (
+                    username_from_cookie != '1c9a923f-fb21-4a91-b3f3-5f18e3f01182'
+                    and check_username_exists(username_from_cookie)
+                ):
+                    st.session_state['LOGGED_IN'] = True
+                    st.session_state['username'] = username_from_cookie
+                    st.success(f"Welcome back, {username_from_cookie}!")
+                    return
+                else:
+                    del self.cookies['__streamlit_login_signup_ui_username__']
+                    self.cookies.save()
+                    st.session_state['LOGGED_IN'] = False 
 
-        if st.session_state['LOGGED_IN'] == False:
+        if not st.session_state['LOGGED_IN']:
             st.session_state['LOGOUT_BUTTON_HIT'] = False 
 
-            del_login = st.empty()
-            with del_login.form("Login Form"):
-                username = st.text_input("Username", placeholder = 'Your unique username')
-                password = st.text_input("Password", placeholder = 'Your password', type = 'password')
-
+            login_form = st.form(key='login_form')
+            with login_form:
+                username = st.text_input("Username", placeholder='Your unique username')
+                password = st.text_input("Password", placeholder='Your password', type='password')
                 st.markdown("###")
-                login_submit_button = st.form_submit_button(label = 'Login')
+                login_submit_button = st.form_submit_button(label='Login')
 
-                if login_submit_button == True:
-                    authenticate_user_check = check_usr_pass(username, password)
+            if login_submit_button:
+                authenticate_user_check = check_usr_pass(username, password)
 
-                    if authenticate_user_check == False:
-                        st.error("Invalid Username or Password!")
+                if not authenticate_user_check:
+                    st.error("Invalid Username or Password!")
+                else:
+                    st.session_state['LOGGED_IN'] = True
+                    st.session_state['username'] = username
 
-                    else:
-                        st.session_state['LOGGED_IN'] = True
-                        self.cookies['__streamlit_login_signup_ui_username__'] = username
-                        self.cookies.save()
-                        del_login.empty()
-                        st.experimental_rerun()
+                    self.cookies['__streamlit_login_signup_ui_username__'] = username
+                    self.cookies.save()
+
+                    st.success(f"Welcome {username}!")
+
+                    st.rerun()
+
+
 
 
     def animation(self) -> None:
@@ -130,68 +144,89 @@ class __login__:
     def sign_up_widget(self) -> None:
         """
         Creates the sign-up widget and stores the user info in a secure way in the _secret_auth_.json file.
+        Working sign-up widget with CAPTCHA verification
         """
+        if 'captcha' not in st.session_state:
+            st.session_state.captcha = {
+                'verified': False,
+                'text': ''.join(random.choices(string.ascii_uppercase + string.digits, k=5)),
+                'image': None
+            }
+
+        if st.session_state.captcha['image'] is None:
+            image = ImageCaptcha(width=200, height=100)
+            img_bytes = image.generate(st.session_state.captcha['text'])
+            img_buffer = io.BytesIO()
+            img_buffer.write(img_bytes.read())
+            st.session_state.captcha['image'] = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
+
+        if not st.session_state.captcha['verified']:
+            self._show_captcha()
+            return
+
         with st.form("Sign Up Form"):
-            name_sign_up = st.text_input("Name *", placeholder = 'Please enter your name')
-            valid_name_check = check_valid_name(name_sign_up)
+            name_sign_up = st.text_input("Name *", placeholder='Please enter your name')
+            email_sign_up = st.text_input("Email *", placeholder='Please enter your email')
+            username_sign_up = st.text_input("Username *", placeholder='Enter a unique username')
+            password_sign_up = st.text_input("Password *", placeholder='Create a strong password', type='password')
 
-            email_sign_up = st.text_input("Email *", placeholder = 'Please enter your email')
-            valid_email_check = check_valid_email(email_sign_up)
-            unique_email_check = check_unique_email(email_sign_up)
-            
-            username_sign_up = st.text_input("Username *", placeholder = 'Enter a unique username')
-            unique_username_check = check_unique_usr(username_sign_up)
+            if st.form_submit_button(label='Register'):
+                if all([name_sign_up, email_sign_up, username_sign_up, password_sign_up]):
+                    register_new_usr(name_sign_up, email_sign_up, username_sign_up, password_sign_up)
+                    st.success("Registration Successful!")
+                    st.session_state.captcha = {
+                        'verified': False,
+                        'text': ''.join(random.choices(string.ascii_uppercase + string.digits, k=5)),
+                        'image': None
+                    }
+                else:
+                    st.error("Please fill all fields!")
 
-            password_sign_up = st.text_input("Password *", placeholder = 'Create a strong password', type = 'password')
+    def _show_captcha(self):
+        """Displays and verifies CAPTCHA challenge"""
+        if st.session_state.captcha['verified']:
+            return  
 
-            st.markdown("###")
-            sign_up_submit_button = st.form_submit_button(label = 'Register')
+        st.warning("Please verify you're not a robot")
+        st.image(io.BytesIO(base64.b64decode(st.session_state.captcha['image'])))
+        captcha_input = st.text_input("Enter CAPTCHA text", key="captcha_input").strip().upper()
 
-            if sign_up_submit_button:
-                if valid_name_check == False:
-                    st.error("Please enter a valid name!")
-
-                elif valid_email_check == False:
-                    st.error("Please enter a valid Email!")
+        if st.button('Verify CAPTCHA'):
+            if captcha_input == st.session_state.captcha['text']:
+                st.session_state.captcha['verified'] = True
+                st.success("Verification successful! You can now register.")
+                st.rerun()
+            else:
+                st.error("Incorrect CAPTCHA. Please try again.")
                 
-                elif unique_email_check == False:
-                    st.error("Email already exists!")
-                
-                elif unique_username_check == False:
-                    st.error(f'Sorry, username {username_sign_up} already exists!')
-                
-                elif unique_username_check == None:
-                    st.error('Please enter a non - empty Username!')
-
-                if valid_name_check == True:
-                    if valid_email_check == True:
-                        if unique_email_check == True:
-                            if unique_username_check == True:
-                                register_new_usr(name_sign_up, email_sign_up, username_sign_up, password_sign_up)
-                                st.success("Registration Successful!")
-
+                st.session_state.captcha = {
+                    'verified': False,
+                    'text': ''.join(random.choices(string.ascii_uppercase + string.digits, k=5)),
+                    'image': None
+                }
+                st.rerun()  
 
     def forgot_password(self) -> None:
-        """
-        Creates the forgot password widget and after user authentication (email), triggers an email to the user 
-        containing a random password.
-        """
-        with st.form("Forgot Password Form"):
-            email_forgot_passwd = st.text_input("Email", placeholder= 'Please enter your email')
-            email_exists_check, username_forgot_passwd = check_email_exists(email_forgot_passwd)
+            """
+            Creates the forgot password widget and after user authentication (email), triggers an email to the user 
+            containing a random password.
+            """
+            with st.form("Forgot Password Form"):
+                email_forgot_passwd = st.text_input("Email", placeholder= 'Please enter your email')
+                email_exists_check, username_forgot_passwd = check_email_exists(email_forgot_passwd)
 
-            st.markdown("###")
-            forgot_passwd_submit_button = st.form_submit_button(label = 'Get Password')
+                st.markdown("###")
+                forgot_passwd_submit_button = st.form_submit_button(label = 'Get Password')
 
-            if forgot_passwd_submit_button:
-                if email_exists_check == False:
-                    st.error("Email ID not registered with us!")
+                if forgot_passwd_submit_button:
+                    if email_exists_check == False:
+                        st.error("Email ID not registered with us!")
 
-                if email_exists_check == True:
-                    random_password = generate_random_passwd()
-                    send_passwd_in_email(self.auth_token, username_forgot_passwd, email_forgot_passwd, self.company_name, random_password)
-                    change_passwd(email_forgot_passwd, random_password)
-                    st.success("Secure Password Sent Successfully!")
+                    if email_exists_check == True:
+                        random_password = generate_random_passwd()
+                        send_passwd_in_email(self.auth_token, username_forgot_passwd, email_forgot_passwd, self.company_name, random_password)
+                        change_passwd(email_forgot_passwd, random_password)
+                        st.success("Secure Password Sent Successfully!")
 
 
     def reset_password(self) -> None:
@@ -243,7 +278,7 @@ class __login__:
                 st.session_state['LOGGED_IN'] = False
                 self.cookies['__streamlit_login_signup_ui_username__'] = '1c9a923f-fb21-4a91-b3f3-5f18e3f01182'
                 del_logout.empty()
-                st.experimental_rerun()
+                st.rerun()
         
 
     def nav_sidebar(self):
@@ -332,4 +367,11 @@ class __login__:
 # Author: Gauri Prabhakar
 # GitHub: https://github.com/GauriSP10/streamlit_login_auth_ui
 
+# Revised by: George Tzanopoulos (github.com/georgetzan)
+# Modifications:
+# - Security improvement: Now checks if the user from the cookie still exists in the user database before auto-login.
+# - Fixed: Old cookies are deleted if the user no longer exists.
+# - Added: CAPTCHA verification to the sign-up page.
+# - Improved: State management for login/logout and user session.
+# - General: Code cleanup and minor UI/UX improvements.
 

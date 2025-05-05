@@ -1,6 +1,6 @@
 import re
 import json
-from trycourier import Courier
+from courier.client import Courier
 import secrets
 from argon2 import PasswordHasher
 import requests
@@ -170,9 +170,9 @@ def send_passwd_in_email(auth_token: str, username_forgot_passwd: str, email_for
     """
     Triggers an email to the user containing the randomly generated password.
     """
-    client = Courier(auth_token = auth_token)
+    client = Courier(authorization_token=auth_token)
 
-    resp = client.send_message(
+    resp = client.send(
     message={
         "to": {
         "email": email_forgot_passwd
@@ -221,3 +221,16 @@ def check_current_passwd(email_reset_passwd: str, current_passwd: str) -> bool:
 
 # Author: Gauri Prabhakar
 # GitHub: https://github.com/GauriSP10/streamlit_login_auth_ui
+
+
+# Revised by: George Tzanopoulos (github.com/georgetzan)
+# Modifications: Fixed Courier
+
+
+
+
+
+
+
+
+
